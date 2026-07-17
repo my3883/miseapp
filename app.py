@@ -273,7 +273,6 @@ def load_data():
         "recipes": {},
         "grocery": [],
         "meal_plan": {},
-        "settings": {"units": "imperial"},
     }
 
 
@@ -282,7 +281,6 @@ def save_data():
         "recipes": st.session_state.recipes,
         "grocery": st.session_state.grocery,
         "meal_plan": st.session_state.meal_plan,
-        "settings": st.session_state.settings,
     }
     try:
         with open(DATA_FILE, "w") as f:
@@ -302,7 +300,6 @@ def init_state():
     st.session_state.recipes = data.get("recipes", {})
     st.session_state.grocery = data.get("grocery", [])
     st.session_state.meal_plan = data.get("meal_plan", {})
-    st.session_state.settings = data.get("settings", {"units": "imperial"})
     st.session_state.page = "home"
     st.session_state.current_id = None
     st.session_state.initialized = True
@@ -322,6 +319,19 @@ def inject_css():
     st.markdown(
         """
         <style>
+        .stApp {
+            background-color: #FFF0C7;
+        }
+        #MainMenu, footer, header {
+            visibility: hidden;
+        }
+        .block-container {
+            padding-top: 1rem;
+            padding-bottom: 2rem;
+            padding-left: 1rem;
+            padding-right: 1rem;
+            max-width: 560px;
+        }
         .stButton > button {
             font-size: 1.0rem;
             padding: 0.55rem 1rem;
@@ -329,7 +339,8 @@ def inject_css():
             width: 100%;
         }
         .mise-card {
-            border: 1px solid rgba(128,128,128,0.25);
+            border: 1px solid rgba(0,0,0,0.12);
+            background-color: rgba(255,255,255,0.55);
             border-radius: 12px;
             padding: 0.9rem 1rem;
             margin-bottom: 0.6rem;
@@ -340,8 +351,13 @@ def inject_css():
             margin-bottom: 0.15rem;
         }
         .mise-meta {
-            color: #888;
+            color: #6b6455;
             font-size: 0.9rem;
+        }
+        .mise-logo-wrap {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 0.25rem;
         }
         </style>
         """,
@@ -354,7 +370,6 @@ def inject_css():
 # ---------------------------------------------------------------------------
 
 def page_home():
-    st.title("Mise")
     st.caption("Your recipes, meal plan, and shopping list.")
 
     search = st.text_input("Search recipes", placeholder="Search by title or tag", label_visibility="collapsed")
@@ -783,48 +798,55 @@ def page_shopping():
                     st.rerun()
 
 
-def page_settings():
-    st.title("Settings")
-
-    units = st.radio(
-        "Units",
-        ["imperial", "metric"],
-        index=0 if st.session_state.settings.get("units", "imperial") == "imperial" else 1,
-        format_func=lambda x: "Imperial (cups, oz, lb)" if x == "imperial" else "Metric (g, ml, kg)",
-    )
-    if units != st.session_state.settings.get("units"):
-        st.session_state.settings["units"] = units
-        save_data()
-
-    st.divider()
-    st.caption(f"Data is stored locally at: `{DATA_FILE}`")
-    if st.button("Clear all data", type="secondary"):
-        st.session_state.recipes = {}
-        st.session_state.grocery = []
-        st.session_state.meal_plan = {}
-        save_data()
-        st.success("Cleared.")
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
+TOP_LEVEL_SECTION = {
+    "home": "recipes",
+    "add": "recipes",
+    "detail": "recipes",
+    "edit": "recipes",
+    "meal_plan": "meal_plan",
+    "shopping": "shopping",
+}
+
+
+def top_nav():
+    current_section = TOP_LEVEL_SECTION.get(st.session_state.page, "recipes")
+
+    logo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
+    if os.path.exists(logo_path):
+        lc1, lc2, lc3 = st.columns([1, 1, 1])
+        with lc2:
+            st.image(logo_path, use_container_width=True)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("🍽 Recipes", type="primary" if current_section == "recipes" else "secondary", use_container_width=True):
+            goto("home")
+            st.rerun()
+    with c2:
+        if st.button("📅 Meal Plan", type="primary" if current_section == "meal_plan" else "secondary", use_container_width=True):
+            goto("meal_plan")
+            st.rerun()
+    with c3:
+        if st.button("🛒 Shopping", type="primary" if current_section == "shopping" else "secondary", use_container_width=True):
+            goto("shopping")
+            st.rerun()
+    st.divider()
+
+
 def main():
-    st.set_page_config(page_title="Mise", page_icon="🔪", layout="centered")
+    logo_small_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo_small.png")
+    st.set_page_config(
+        page_title="Mise",
+        page_icon=logo_small_path if os.path.exists(logo_small_path) else "🔪",
+        layout="centered",
+    )
     init_state()
     inject_css()
-
-    with st.sidebar:
-        st.markdown("### Mise")
-        if st.button("🍽 Recipes", use_container_width=True):
-            goto("home")
-        if st.button("📅 Meal Plan", use_container_width=True):
-            goto("meal_plan")
-        if st.button("🛒 Shopping List", use_container_width=True):
-            goto("shopping")
-        if st.button("⚙️ Settings", use_container_width=True):
-            goto("settings")
+    top_nav()
 
     page = st.session_state.page
     if page == "home":
@@ -839,8 +861,6 @@ def main():
         page_meal_plan()
     elif page == "shopping":
         page_shopping()
-    elif page == "settings":
-        page_settings()
     else:
         page_home()
 
