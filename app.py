@@ -177,7 +177,75 @@ def parse_ingredients_text(text):
     return result
 
 
+def parse_recipe_from_url(url):
+    """
+    Fetch a recipe page and extract title / ingredients / steps.
+
+    Uses the recipe-scrapers library, which has purpose-built parsers for
+    hundreds of recipe sites and falls back to generic schema.org recipe
+    markup for everything else. Raises RuntimeError with a plain-language
+    message on any failure, so the UI can just show it.
+    """
+    try:
+        import requests
+    except ImportError:
+        raise RuntimeError("The 'requests' package isn't installed. Run: pip install -r requirements.txt")
+    try:
+        from recipe_scrapers import scrape_html
+    except ImportError:
+        raise RuntimeError("The 'recipe-scrapers' package isn't installed. Run: pip install -r requirements.txt")
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+        )
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+    except Exception as e:
+        raise RuntimeError(f"Couldn't reach that page: {e}")
+
+    try:
+        scraper = scrape_html(resp.text, org_url=url, supported_only=False)
+    except Exception:
+        raise RuntimeError(
+            "Couldn't find recipe data on that page. Some sites block automated "
+            "requests, or don't mark up their recipe in a format this can read. "
+            "Try Paste / Import instead: copy the recipe text and paste it there."
+        )
+
+    def safe(fn, default=None):
+        try:
+            val = fn()
+            return val if val else default
+        except Exception:
+            return default
+
+    title = safe(scraper.title, "Untitled Recipe")
+    ingredients_raw = safe(scraper.ingredients, []) or []
+    instructions_raw = safe(scraper.instructions, "") or ""
+    total_time = safe(scraper.total_time)
+    yields = safe(scraper.yields, "")
+
+    ingredients = [parse_ingredient_line(l) for l in ingredients_raw if l and l.strip()]
+    ingredients = [i for i in ingredients if i]
+    steps = parse_steps_text(instructions_raw)
+
+    return {
+        "title": (title or "Untitled Recipe").strip(),
+        "servings": (yields or "").strip(),
+        "prep_time": "",
+        "cook_time": f"{total_time} min" if total_time else "",
+        "ingredients": ingredients,
+        "steps": steps,
+        "source_url": url,
+    }
+
+
 def naive_recipe_parse(blob):
+
     """
     Very lightweight parser for pasted / imported recipe text.
     Looks for an 'Ingredients' and 'Steps'/'Instructions' section header.
@@ -413,7 +481,52 @@ def page_add():
     if st.button("← Back"):
         goto("home")
 
-    tab_paste, tab_manual = st.tabs(["Paste / Import", "Manual Entry"])
+    tab_url, tab_paste, tab_manual = st.tabs(["From URL", "Paste / Import", "Manual Entry"])
+
+    with tab_url:
+        st.caption(
+            "Paste a link to a recipe page. Works best on recipe blogs and food "
+            "sites, since most of them mark up their ingredients and steps in a "
+            "standard format behind the scenes."
+        )
+        url = st.text_input("Recipe URL", key="url_input", placeholder="https://www.example.com/some-recipe")
+        if st.button("Import from URL", key="import_url_btn"):
+            if not url.strip():
+                st.warning("Paste a URL first.")
+            else:
+                with st.spinner("Reading the recipe..."):
+                    try:
+                        parsed = parse_recipe_from_url(url.strip())
+                        error = None
+                    except RuntimeError as e:
+                        parsed = None
+                        error = str(e)
+                if error:
+                    st.error(error)
+                elif parsed:
+                    rid = new_id()
+                    recipe = {
+                        "id": rid,
+                        "title": parsed["title"],
+                        "servings": parsed["servings"],
+                        "prep_time": parsed["prep_time"],
+                        "cook_time": parsed["cook_time"],
+                        "tags": [],
+                        "ingredients": parsed["ingredients"],
+                        "steps": parsed["steps"],
+                        "mise_sort": "list",
+                        "source_url": parsed.get("source_url", ""),
+                        "created_at": datetime.now().isoformat(),
+                    }
+                    st.session_state.recipes[rid] = recipe
+                    save_data()
+                    if not parsed["ingredients"] and not parsed["steps"]:
+                        st.warning(
+                            "Found the page but couldn't pull out ingredients or steps. "
+                            "You can add them on the Edit page now."
+                        )
+                    goto("detail", rid)
+                    st.rerun()
 
     with tab_paste:
         st.caption("Paste a full recipe (title on the first line, then Ingredients / Steps sections if you have them).")
@@ -434,6 +547,7 @@ def page_add():
                     "ingredients": parsed["ingredients"],
                     "steps": parsed["steps"],
                     "mise_sort": "list",
+                    "source_url": "",
                     "created_at": datetime.now().isoformat(),
                 }
                 st.session_state.recipes[rid] = recipe
@@ -480,6 +594,7 @@ def page_add():
                     "ingredients": parse_ingredients_text(ing_text),
                     "steps": parse_steps_text(steps_text),
                     "mise_sort": "list",
+                    "source_url": "",
                     "created_at": datetime.now().isoformat(),
                 }
                 st.session_state.recipes[rid] = recipe
@@ -513,6 +628,8 @@ def page_detail():
         meta_bits.append(f"Cook {recipe['cook_time']}")
     if meta_bits:
         st.caption(" · ".join(meta_bits))
+    if recipe.get("source_url"):
+        st.caption(f"Source: {recipe['source_url']}")
 
     st.subheader("Ingredients")
     if recipe["ingredients"]:
