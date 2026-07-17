@@ -198,12 +198,28 @@ def parse_recipe_from_url(url):
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-        )
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.google.com/",
+        "Upgrade-Insecure-Requests": "1",
     }
     try:
-        resp = requests.get(url, headers=headers, timeout=15)
+        session = requests.Session()
+        resp = session.get(url, headers=headers, timeout=15)
         resp.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else None
+        if status in (403, 429, 401):
+            raise RuntimeError(
+                "This site is blocking automated requests (it's not a parsing "
+                "problem, it's the site actively saying no). Some large "
+                "publishers do this regardless of what headers a script sends. "
+                "Use Paste / Import instead: open the page yourself, copy the "
+                "ingredients and steps, and paste them there."
+            )
+        raise RuntimeError(f"Couldn't reach that page: {e}")
     except Exception as e:
         raise RuntimeError(f"Couldn't reach that page: {e}")
 
